@@ -1,0 +1,11 @@
+{
+  "name": "@pdf-vision/api",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "build": "echo \"No build step for FastAPI app\"",
+    "lint": "python -m compileall app",
+    "test": "echo \"No backend tests configured yet\""
+  }
+}

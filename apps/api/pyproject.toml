@@ -1,0 +1,15 @@
+[project]
+name = "pdf-vision-api"
+version = "0.1.0"
+description = "FastAPI backend for PDF image extraction and OCR."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.115.0",
+  "uvicorn[standard]==0.30.6",
+  "python-multipart==0.0.12",
+  "pydantic-settings==2.5.2",
+  "PyMuPDF==1.24.10",
+  "Pillow==10.4.0",
+  "pytesseract==0.3.13"
+]
