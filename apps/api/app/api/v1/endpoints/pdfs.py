@@ -129,6 +129,9 @@ def _run_transcription_task(app_state: Any, document_id: str, ocr_languages: str
                     ocr_result.status,
                     ocr_result.text,
                     ocr_result.confidence,
+                    layout_blocks=[
+                        block.to_payload() for block in (ocr_result.layout_blocks or [])
+                    ],
                     strategy_used=ocr_result.strategy_used,
                     preprocessing_used=ocr_result.preprocessing_used,
                     error=ocr_result.error,

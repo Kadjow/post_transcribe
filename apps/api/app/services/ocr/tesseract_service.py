@@ -1,5 +1,5 @@
 ﻿import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from shutil import which
 from typing import Any
@@ -7,6 +7,7 @@ from typing import Any
 import pytesseract
 
 from app.services.ocr.base import OcrService, OcrTranscriptionResult
+from app.services.ocr.layout_structure_service import LayoutStructureService
 from app.utils.images import OcrImageVariant, build_ocr_variants
 
 
@@ -43,6 +44,7 @@ class OcrAttemptResult:
 class TesseractOcrService(OcrService):
     def __init__(self, tesseract_cmd: str | None = None):
         self.tesseract_cmd = tesseract_cmd or self._discover_windows_tesseract()
+        self.layout_service = LayoutStructureService()
         if self.tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
 
@@ -86,7 +88,8 @@ class TesseractOcrService(OcrService):
                 variant.image.close()
 
         if attempts:
-            return self._select_best_result(attempts)
+            result = self._select_best_result(attempts)
+            return self._attach_layout_blocks(image_path, languages, result)
 
         if last_error is not None:
             return OcrTranscriptionResult(
@@ -97,6 +100,17 @@ class TesseractOcrService(OcrService):
             )
 
         return OcrTranscriptionResult(status="NO_TEXT", text="", confidence=None)
+
+    def _attach_layout_blocks(
+        self, image_path: Path, languages: str, result: OcrTranscriptionResult
+    ) -> OcrTranscriptionResult:
+        try:
+            layout_blocks = self.layout_service.extract_blocks(image_path, languages)
+        except Exception:
+            return result
+        if not layout_blocks:
+            return result
+        return replace(result, layout_blocks=layout_blocks)
 
     def _run_attempt(
         self, variant: OcrImageVariant, strategy: OcrAttemptStrategy, languages: str
@@ -413,3 +427,5 @@ class TesseractOcrService(OcrService):
             if Path(candidate).exists():
                 return candidate
         return None
+
+

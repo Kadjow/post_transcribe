@@ -127,6 +127,7 @@ class PdfService:
                                 "imageId": f"img_{file_base}",
                                 "status": "NOT_REQUESTED",
                                 "text": "",
+                                "layoutBlocks": [],
                                 "confidence": None,
                                 "strategyUsed": None,
                                 "preprocessingUsed": None,

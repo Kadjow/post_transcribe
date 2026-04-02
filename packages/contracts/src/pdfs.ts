@@ -66,10 +66,17 @@ export interface OcrResult {
   imageId: string;
   status: OcrStatus;
   text: string;
+  layoutBlocks: OcrLayoutBlock[];
   confidence: number | null;
   strategyUsed?: string | null;
   preprocessingUsed?: string | null;
   error?: string;
+}
+
+export interface OcrLayoutBlock {
+  type: "text" | "image";
+  bbox: [number, number, number, number] | number[];
+  text?: string | null;
 }
 
 export interface DocumentImage {

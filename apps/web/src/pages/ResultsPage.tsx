@@ -36,6 +36,23 @@ export function ResultsPage(): JSX.Element {
     [images, activeImageId]
   );
   const activeImage: DocumentImage | null = activeIndex >= 0 ? images[activeIndex] : null;
+  const structuredBlocks = useMemo(
+    () => activeImage?.ocr.layoutBlocks ?? [],
+    [activeImage?.ocr.layoutBlocks]
+  );
+  const copyableText = useMemo(() => {
+    if (!activeImage) {
+      return "";
+    }
+    if (structuredBlocks.length > 0) {
+      return structuredBlocks
+        .filter((block) => block.type === "text" && Boolean(block.text?.trim()))
+        .map((block) => block.text?.trim() ?? "")
+        .join("\n\n")
+        .trim();
+    }
+    return (activeImage.ocr.text ?? "").trim();
+  }, [activeImage, structuredBlocks]);
 
   useEffect(() => {
     if (images.length === 0) {
@@ -89,12 +106,12 @@ export function ResultsPage(): JSX.Element {
   }
 
   const handleCopy = async () => {
-    if (!activeImage?.ocr.text?.trim()) {
+    if (!copyableText) {
       setCopyMessage("Nao ha transcricao para copiar nesta imagem.");
       return;
     }
     try {
-      await navigator.clipboard.writeText(activeImage.ocr.text);
+      await navigator.clipboard.writeText(copyableText);
       setCopyMessage("Transcricao copiada.");
     } catch {
       setCopyMessage("Nao foi possivel copiar a transcricao.");
@@ -187,13 +204,39 @@ export function ResultsPage(): JSX.Element {
                 {activeImage.ocr.status === "NOT_REQUESTED" ? (
                   <p className="muted">Esta imagem nao foi selecionada para OCR.</p>
                 ) : null}
-                {activeImage.ocr.text ? (
+                {structuredBlocks.length > 0 ? (
+                  <section className="layout-blocks stack tight">
+                    {structuredBlocks.map((block, index) =>
+                      block.type === "image" ? (
+                        <div
+                          key={`${activeImage.id}-image-${index}`}
+                          className="layout-image-marker"
+                        >
+                          [Imagem detectada]
+                        </div>
+                      ) : (
+                        <pre
+                          key={`${activeImage.id}-text-${index}`}
+                          className="ocr-text readable-text layout-text-block"
+                        >
+                          {block.text ?? ""}
+                        </pre>
+                      )
+                    )}
+                  </section>
+                ) : activeImage.ocr.text ? (
                   <pre className="ocr-text detail-text readable-text">{activeImage.ocr.text}</pre>
                 ) : (
                   <p className="muted">
                     Nenhuma transcricao disponivel para esta imagem ate o momento.
                   </p>
                 )}
+                {structuredBlocks.length > 0 && activeImage.ocr.text ? (
+                  <details className="technical-details">
+                    <summary>Mostrar transcricao corrida</summary>
+                    <pre className="ocr-text readable-text">{activeImage.ocr.text}</pre>
+                  </details>
+                ) : null}
                 <p className="confidence-line">
                   Confianca da leitura: <strong>{formatConfidence(activeImage.ocr.confidence)}</strong>
                 </p>

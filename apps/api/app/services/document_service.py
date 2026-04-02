@@ -191,6 +191,7 @@ class DocumentService:
                         "imageId": image["id"],
                         "status": "PENDING",
                         "text": "",
+                        "layoutBlocks": [],
                         "confidence": None,
                         "strategyUsed": None,
                         "preprocessingUsed": None,
@@ -201,6 +202,7 @@ class DocumentService:
                         "imageId": image["id"],
                         "status": "NOT_REQUESTED",
                         "text": "",
+                        "layoutBlocks": [],
                         "confidence": None,
                         "strategyUsed": None,
                         "preprocessingUsed": None,
@@ -255,6 +257,7 @@ class DocumentService:
         status: str,
         text: str,
         confidence: float | None,
+        layout_blocks: list[dict[str, Any]] | None = None,
         strategy_used: str | None = None,
         preprocessing_used: str | None = None,
         error: str | None = None,
@@ -267,6 +270,7 @@ class DocumentService:
                 "imageId": image_id,
                 "status": status,
                 "text": text,
+                "layoutBlocks": layout_blocks or [],
                 "confidence": confidence,
                 "strategyUsed": strategy_used,
                 "preprocessingUsed": preprocessing_used,
@@ -421,6 +425,7 @@ class DocumentService:
                     image["height"] = 0
                 image.setdefault("ocr", {})
                 image["ocr"].setdefault("imageId", image.get("id", ""))
+                image["ocr"].setdefault("layoutBlocks", [])
                 image["ocr"].setdefault("strategyUsed", None)
                 image["ocr"].setdefault("preprocessingUsed", None)
                 image.pop("_storage", None)

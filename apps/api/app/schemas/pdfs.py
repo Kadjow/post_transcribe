@@ -72,10 +72,17 @@ class DocumentProcessingStatusSchema(BaseModel):
     updatedAt: str
 
 
+class OcrLayoutBlockSchema(BaseModel):
+    type: Literal["text", "image"]
+    bbox: list[int]
+    text: str | None = None
+
+
 class OcrResultSchema(BaseModel):
     imageId: str
     status: OcrStatus
     text: str
+    layoutBlocks: list[OcrLayoutBlockSchema] = Field(default_factory=list)
     confidence: float | None = None
     strategyUsed: str | None = None
     preprocessingUsed: str | None = None

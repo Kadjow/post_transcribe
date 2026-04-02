@@ -415,6 +415,25 @@ button:disabled {
   color: #0f172a;
 }
 
+.layout-blocks {
+  margin-top: 4px;
+}
+
+.layout-text-block {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.layout-image-marker {
+  border: 1px dashed #94a3b8;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #334155;
+  background: #f8fafc;
+  font-weight: 700;
+}
+
 .result-status-grid {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
