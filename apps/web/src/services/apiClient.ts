@@ -1,5 +1,28 @@
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const LOCAL_API_BASE_URL = "http://localhost:8000";
+const PRODUCTION_API_BASE_URL = "https://post-transcribe-api.onrender.com";
+
+function stripTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function resolveApiBaseUrl(): string {
+  const envBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (envBaseUrl) {
+    return stripTrailingSlash(envBaseUrl);
+  }
+
+  if (typeof window !== "undefined" && isLocalHostname(window.location.hostname)) {
+    return LOCAL_API_BASE_URL;
+  }
+
+  return PRODUCTION_API_BASE_URL;
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {

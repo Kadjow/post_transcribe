@@ -23,7 +23,10 @@ export function UploadPage(): JSX.Element {
       });
       navigate(`/review/${response.documentId}`);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Falha no upload.");
+      console.error("Falha ao enviar PDF para analise", submitError);
+      const reason =
+        submitError instanceof Error ? submitError.message : "Falha no upload do arquivo.";
+      setError(`Nao foi possivel analisar o PDF. ${reason}`);
     } finally {
       setIsLoading(false);
     }

@@ -1,4 +1,4 @@
-import { ApiError } from "../services/apiClient";
+import { API_BASE_URL, ApiError } from "../services/apiClient";
 
 export type ErrorContext =
   | "upload"
@@ -69,9 +69,10 @@ function isInvalidFileError(error: unknown, message: string): boolean {
 
 function networkGuidance(): ErrorGuidance {
   return {
-    title: "Falha temporaria de comunicacao",
-    description: "Nao conseguimos concluir a solicitacao por instabilidade de conexao.",
-    nextStep: "Tente novamente. Se continuar falhando, recarregue a pagina."
+    title: "Falha de comunicacao com a API",
+    description:
+      "Nao foi possivel concluir a solicitacao. Isso pode ocorrer por indisponibilidade da API, bloqueio de CORS ou configuracao incorreta da URL.",
+    nextStep: `Verifique se ${API_BASE_URL}/health responde e se o CORS permite este dominio, depois tente novamente.`
   };
 }
 
