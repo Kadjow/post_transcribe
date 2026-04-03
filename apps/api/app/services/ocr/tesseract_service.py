@@ -43,10 +43,11 @@ class OcrAttemptResult:
 
 class TesseractOcrService(OcrService):
     def __init__(self, tesseract_cmd: str | None = None):
-        self.tesseract_cmd = tesseract_cmd or self._discover_windows_tesseract()
+        self.tesseract_cmd = (
+            tesseract_cmd or self._discover_windows_tesseract() or "tesseract"
+        )
         self.layout_service = LayoutStructureService()
-        if self.tesseract_cmd:
-            pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
+        pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
 
     def ensure_available(self) -> None:
         try:
