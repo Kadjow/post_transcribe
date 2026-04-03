@@ -11,7 +11,8 @@ const STAGE_LABELS: Record<ProcessingStage, string> = {
   extracting_images: "Extraindo imagens",
   generating_thumbnails: "Gerando miniaturas",
   ready_for_selection: "Pronto para selecao do usuario",
-  ocr_running: "OCR em execucao",
+  ocr_running: "Transcricao em andamento",
+  cancelled: "Transcricao cancelada",
   completed: "Concluido",
   completed_with_errors: "Concluido com erros",
   failed: "Falhou"
@@ -27,6 +28,7 @@ const ANALYSIS_IN_PROGRESS_STAGES: ProcessingStage[] = [
 const ANALYSIS_COMPLETED_STAGES: ProcessingStage[] = [
   "ready_for_selection",
   "ocr_running",
+  "cancelled",
   "completed",
   "completed_with_errors"
 ];
@@ -55,7 +57,7 @@ export function processingTone(
   if (stage === "completed" || stage === "ready_for_selection") {
     return "success";
   }
-  if (stage === "completed_with_errors") {
+  if (stage === "completed_with_errors" || stage === "cancelled") {
     return "warning";
   }
   if (stage === "failed") {
@@ -72,6 +74,12 @@ export function ocrTone(status: OcrStatus): "neutral" | "success" | "warning" | 
     return "success";
   }
   if (status === "LOW_CONFIDENCE" || status === "NO_TEXT" || status === "PENDING") {
+    return "warning";
+  }
+  if (status === "PROCESSING") {
+    return "neutral";
+  }
+  if (status === "CANCELLED") {
     return "warning";
   }
   if (status === "ERROR") {
@@ -120,15 +128,15 @@ export function ocrProgressValue(
   if (!processing) {
     return 0;
   }
+  if (result?.status.transcription === "COMPLETED" || result?.status.transcription === "CANCELLED") {
+    return 100;
+  }
   const selected = safeCount(processing.imagesSelected);
   if (selected <= 0) {
     return 0;
   }
   const processed = safeCount(processing.imagesProcessed);
   const value = (Math.min(processed, selected) / selected) * 100;
-  if (result?.status.transcription === "COMPLETED") {
-    return clampPercent(selected === 0 ? 0 : 100);
-  }
   return clampPercent(value);
 }
 
@@ -170,41 +178,54 @@ export function ocrStatusLabel(
   result: DocumentResult | null
 ): string {
   if (!processing) {
-    return "Aguardando status do OCR";
+    return "Aguardando status da transcricao";
   }
   const selected = safeCount(processing.imagesSelected);
   const processed = safeCount(processing.imagesProcessed);
   const failed = safeCount(processing.imagesFailed);
-  const transcribedText = `${Math.min(processed, selected)}/${selected} imagens`;
+  const cancelled = safeCount(processing.imagesCancelled);
+  const processedText = `${Math.min(processed, selected)}/${selected} imagens`;
 
   if (result?.status.transcription === "IDLE") {
-    return "Nao iniciado";
+    return "Transcricao nao iniciada";
   }
   if (result?.status.transcription === "IN_PROGRESS" || processing.stage === "ocr_running") {
     if (selected <= 0) {
-      return "Em andamento";
+      return "Processando";
     }
-    return `Em andamento (${transcribedText})`;
+    return `Processando (${processedText})`;
   }
   if (result?.status.transcription === "FAILED") {
     if (selected <= 0) {
-      return "Falhou";
+      return "Erro";
     }
-    return `Falhou (${transcribedText})`;
+    return `Erro (${processedText})`;
+  }
+  if (result?.status.transcription === "CANCELLED" || processing.stage === "cancelled") {
+    return `Cancelada (${cancelled} imagem(ns))`;
   }
   if (result?.status.transcription === "COMPLETED") {
-    if (selected <= 0) {
-      return "Nao iniciado (nenhuma imagem selecionada)";
+    if (selected <= 0 && cancelled <= 0) {
+      return "Transcricao nao iniciada";
     }
     if (failed > 0) {
-      return `Concluido com erros (${transcribedText})`;
+      return `Concluida com erros (${processedText})`;
     }
-    return `Concluido (${transcribedText})`;
+    if (cancelled > 0 && selected <= 0) {
+      return `Cancelada (${cancelled} imagem(ns))`;
+    }
+    if (cancelled > 0) {
+      return `Concluida com cancelamentos (${processedText})`;
+    }
+    return `Concluida (${processedText})`;
+  }
+  if (selected <= 0 && cancelled > 0) {
+    return `Cancelada (${cancelled} imagem(ns))`;
   }
   if (selected <= 0) {
-    return "Nao iniciado";
+    return "Transcricao nao iniciada";
   }
-  return `${transcribedText} processadas`;
+  return `${processedText} finalizadas`;
 }
 
 export function flowStateLabel(
@@ -222,16 +243,21 @@ export function flowStateLabel(
     return "Aguardando selecao de imagens";
   }
   if (processing.stage === "ocr_running") {
-    return "OCR em andamento";
+    return "Transcricao em andamento";
+  }
+  if (processing.stage === "cancelled") {
+    return "Transcricao cancelada";
   }
   if (processing.stage === "completed") {
-    return processing.imagesSelected > 0 ? "Fluxo concluido" : "Concluido sem OCR";
+    return processing.imagesSelected > 0 ? "Fluxo concluido" : "Concluido sem transcricao";
   }
   if (processing.stage === "completed_with_errors") {
     return "Concluido com erros";
   }
   if (processing.stage === "failed") {
-    return result?.status.analysis === "FAILED" ? "Falha na analise" : "Falha no OCR";
+    return result?.status.analysis === "FAILED"
+      ? "Falha na analise"
+      : "Falha na transcricao";
   }
   return "Aguardando status";
 }
@@ -245,27 +271,30 @@ export function flowStateDescription(
   }
 
   if (ANALYSIS_IN_PROGRESS_STAGES.includes(processing.stage)) {
-    return "Analise do PDF em andamento. OCR ainda nao foi iniciado.";
+    return "Analise do PDF em andamento. A transcricao ainda nao foi iniciada.";
   }
   if (processing.stage === "ready_for_selection") {
-    return "Analise concluida. OCR nao iniciado; selecione as imagens para continuar.";
+    return "Analise concluida. Selecione as imagens para iniciar a transcricao.";
   }
   if (processing.stage === "ocr_running") {
-    return "OCR em execucao nas imagens selecionadas.";
+    return "Transcricao em andamento nas imagens selecionadas.";
+  }
+  if (processing.stage === "cancelled") {
+    return "Transcricao cancelada para todas as imagens elegiveis.";
   }
   if (processing.stage === "completed") {
     if (processing.imagesSelected <= 0) {
-      return "Processo concluido sem OCR porque nenhuma imagem foi selecionada.";
+      return "Processo concluido sem transcricao porque nenhuma imagem permaneceu selecionada.";
     }
-    return "Processo concluido com OCR finalizado.";
+    return "Processo concluido com transcricao finalizada.";
   }
   if (processing.stage === "completed_with_errors") {
-    return "OCR finalizado com erros em parte das imagens selecionadas.";
+    return "Transcricao finalizada com erros em parte das imagens selecionadas.";
   }
   if (processing.stage === "failed") {
     return result?.status.analysis === "FAILED"
-      ? "A analise falhou e o OCR nao foi iniciado."
-      : "O OCR falhou durante a execucao.";
+      ? "A analise falhou e a transcricao nao foi iniciada."
+      : "A transcricao falhou durante a execucao.";
   }
   return processing.message;
 }

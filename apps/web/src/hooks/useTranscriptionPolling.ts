@@ -3,23 +3,28 @@ import type { DocumentProcessingStatus, DocumentResult } from "../types/api";
 import { getDocumentStatus, getResults } from "../services/pdfService";
 import { POLLING_INTERVAL_MS } from "../utils/constants";
 
-interface TranscriptionPollingState {
+interface TranscriptionPollingInternalState {
   data: DocumentResult | null;
   processing: DocumentProcessingStatus | null;
   isLoading: boolean;
   error: string | null;
 }
 
+interface TranscriptionPollingState extends TranscriptionPollingInternalState {
+  retry: () => void;
+}
+
 export function useTranscriptionPolling(
   documentId: string | undefined
 ): TranscriptionPollingState {
-  const [state, setState] = useState<TranscriptionPollingState>({
+  const [state, setState] = useState<TranscriptionPollingInternalState>({
     data: null,
     processing: null,
     isLoading: false,
     error: null
   });
   const timerRef = useRef<number | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     if (!documentId) {
@@ -66,12 +71,14 @@ export function useTranscriptionPolling(
         if (!isMounted) {
           return;
         }
-        setState({
-          data: null,
-          processing: null,
+        setState((previous) => ({
+          ...previous,
           isLoading: false,
-          error: error instanceof Error ? error.message : "Failed to fetch OCR results."
-        });
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao buscar os resultados da transcricao."
+        }));
       }
     };
 
@@ -81,7 +88,14 @@ export function useTranscriptionPolling(
       isMounted = false;
       stopTimer();
     };
-  }, [documentId]);
+  }, [documentId, retryNonce]);
 
-  return state;
+  const retry = () => {
+    setRetryNonce((previous) => previous + 1);
+  };
+
+  return {
+    ...state,
+    retry
+  };
 }

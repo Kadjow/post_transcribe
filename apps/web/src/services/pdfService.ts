@@ -1,5 +1,7 @@
 import type {
   AnalyzePdfResponse,
+  CancelTranscriptionRequest,
+  CancelTranscriptionResponse,
   DocumentProcessingStatus,
   DocumentResult,
   StartTranscriptionRequest,
@@ -30,6 +32,18 @@ export async function startTranscription(
   payload: StartTranscriptionRequest
 ): Promise<StartTranscriptionResponse> {
   return request<StartTranscriptionResponse>("/v1/pdfs/transcriptions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function cancelTranscription(
+  payload: CancelTranscriptionRequest
+): Promise<CancelTranscriptionResponse> {
+  return request<CancelTranscriptionResponse>("/v1/pdfs/transcriptions/cancel", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"

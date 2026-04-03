@@ -1,5 +1,7 @@
 export type {
   AnalyzePdfResponse,
+  CancelTranscriptionRequest,
+  CancelTranscriptionResponse,
   DocumentProcessingStatus,
   DocumentImage,
   DocumentPage,
@@ -10,4 +12,4 @@ export type {
   StartTranscriptionRequest,
   StartTranscriptionResponse,
   TranscriptionMode
-} from "@pdf-vision/contracts";
+} from "@pdf-transcribe/contracts";

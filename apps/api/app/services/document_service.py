@@ -16,13 +16,15 @@ PROCESSING_STAGES = {
     "generating_thumbnails",
     "ready_for_selection",
     "ocr_running",
+    "cancelled",
     "completed",
     "completed_with_errors",
     "failed",
 }
 
 OCR_SUCCESS_STATUSES = {"DONE", "LOW_CONFIDENCE", "NO_TEXT"}
-OCR_PROCESSED_STATUSES = OCR_SUCCESS_STATUSES | {"ERROR"}
+OCR_PROCESSED_STATUSES = OCR_SUCCESS_STATUSES | {"ERROR", "CANCELLED"}
+OCR_CANCELLABLE_STATUSES = {"PENDING", "PROCESSING"}
 
 
 class DocumentService:
@@ -45,6 +47,7 @@ class DocumentService:
                 "transcribedTotal": 0,
                 "lowConfidenceTotal": 0,
                 "noTextTotal": 0,
+                "cancelledTotal": 0,
             },
             "pages": [],
             "updatedAt": timestamp,
@@ -80,7 +83,7 @@ class DocumentService:
             self._set_processing(
                 record,
                 stage="analyzing_pdf",
-                message="Analyzing PDF structure.",
+                message="Analisando estrutura do PDF.",
                 has_error=False,
                 error_message=None,
             )
@@ -98,7 +101,7 @@ class DocumentService:
         images_found: int | None = None,
     ) -> None:
         if stage not in PROCESSING_STAGES:
-            raise ValueError(f"Unsupported processing stage: {stage}")
+            raise ValueError(f"Etapa de processamento nao suportada: {stage}")
 
         def _mutate(record: dict[str, Any]) -> None:
             processing = self._ensure_processing(record)
@@ -132,7 +135,7 @@ class DocumentService:
             self._set_processing(
                 record,
                 stage="ready_for_selection",
-                message="Images are ready. Select which ones should run OCR.",
+                message="Imagens prontas. Selecione quais devem seguir para transcricao.",
                 has_error=False,
                 error_message=None,
             )
@@ -146,7 +149,7 @@ class DocumentService:
             self._set_processing(
                 record,
                 stage="failed",
-                message="Failed to analyze PDF.",
+                message="Falha ao analisar o PDF.",
                 has_error=True,
                 error_message=error_message,
             )
@@ -165,7 +168,7 @@ class DocumentService:
         def _mutate(record: dict[str, Any]) -> None:
             nonlocal accepted_ids
             if record["status"]["analysis"] != "COMPLETED":
-                raise ValueError("Document analysis is not completed yet.")
+                raise ValueError("A analise do documento ainda nao foi concluida.")
 
             all_images = self._flatten_images(record)
             image_lookup = {image["id"]: image for image in all_images}
@@ -177,10 +180,12 @@ class DocumentService:
             elif mode == "SELECTED":
                 missing = [image_id for image_id in image_ids if image_id not in image_lookup]
                 if missing:
-                    raise ValueError(f"Invalid imageIds for this document: {missing}")
+                    raise ValueError(
+                        f"imageIds invalidos para este documento: {missing}"
+                    )
                 accepted_ids = list(dict.fromkeys(image_ids))
             else:
-                raise ValueError(f"Unsupported mode: {mode}")
+                raise ValueError(f"Modo de transcricao nao suportado: {mode}")
 
             accepted_set = set(accepted_ids)
             for image in all_images:
@@ -192,6 +197,7 @@ class DocumentService:
                         "status": "PENDING",
                         "text": "",
                         "layoutBlocks": [],
+                        "structuredContent": None,
                         "confidence": None,
                         "strategyUsed": None,
                         "preprocessingUsed": None,
@@ -203,6 +209,7 @@ class DocumentService:
                         "status": "NOT_REQUESTED",
                         "text": "",
                         "layoutBlocks": [],
+                        "structuredContent": None,
                         "confidence": None,
                         "strategyUsed": None,
                         "preprocessingUsed": None,
@@ -220,7 +227,7 @@ class DocumentService:
                 self._set_processing(
                     record,
                     stage="ocr_running",
-                    message=f"OCR started for {len(accepted_ids)} image(s).",
+                    message=f"Transcricao iniciada para {len(accepted_ids)} imagem(ns).",
                     has_error=False,
                     error_message=None,
                 )
@@ -228,7 +235,7 @@ class DocumentService:
                 self._set_processing(
                     record,
                     stage="completed",
-                    message="No images selected. Processing finished.",
+                    message="Nenhuma imagem selecionada. Fluxo finalizado.",
                     has_error=False,
                     error_message=None,
                     progress=100.0,
@@ -250,6 +257,125 @@ class DocumentService:
                     selected.append((image["id"], Path(image_path)))
         return selected
 
+    def claim_next_image_for_transcription(
+        self, document_id: str
+    ) -> tuple[str, Path] | None:
+        claimed: tuple[str, Path] | None = None
+
+        def _mutate(record: dict[str, Any]) -> None:
+            nonlocal claimed
+            for image in self._flatten_images(record):
+                image_ocr = image.get("ocr", {})
+                if not image.get("selectedForTranscription"):
+                    continue
+                if image_ocr.get("status") != "PENDING":
+                    continue
+                image_path = image.get("_storage", {}).get("imagePath")
+                if not image_path:
+                    continue
+
+                image["ocr"] = {
+                    "imageId": image["id"],
+                    "status": "PROCESSING",
+                    "text": "",
+                    "layoutBlocks": [],
+                    "structuredContent": None,
+                    "confidence": None,
+                    "strategyUsed": None,
+                    "preprocessingUsed": None,
+                    "error": None,
+                }
+                claimed = (image["id"], Path(image_path))
+                self._recalculate_summary(record)
+                processing = self._ensure_processing(record)
+                selected = int(processing.get("imagesSelected") or 0)
+                processed = int(processing.get("imagesProcessed") or 0)
+                self._set_processing(
+                    record,
+                    stage="ocr_running",
+                    message=(
+                        f"Transcricao em andamento: {processed}/{selected} imagem(ns) finalizadas."
+                        if selected > 0
+                        else "Transcricao em andamento."
+                    ),
+                    has_error=bool(processing.get("imagesFailed", 0)),
+                    error_message=processing.get("errorMessage"),
+                )
+                return
+
+        self.mutate_record(document_id, _mutate)
+        return claimed
+
+    def cancel_transcription(
+        self, document_id: str, mode: str, image_ids: list[str]
+    ) -> list[str]:
+        cancelled_ids: list[str] = []
+
+        def _mutate(record: dict[str, Any]) -> None:
+            nonlocal cancelled_ids
+            all_images = self._flatten_images(record)
+            image_lookup = {image["id"]: image for image in all_images}
+
+            if mode == "ALL":
+                target_ids = [image["id"] for image in all_images]
+            elif mode == "SELECTED":
+                missing = [image_id for image_id in image_ids if image_id not in image_lookup]
+                if missing:
+                    raise ValueError(
+                        f"imageIds invalidos para este documento: {missing}"
+                    )
+                target_ids = list(dict.fromkeys(image_ids))
+            else:
+                raise ValueError(f"Modo de cancelamento nao suportado: {mode}")
+
+            for image_id in target_ids:
+                image = image_lookup[image_id]
+                ocr_status = str(image.get("ocr", {}).get("status") or "")
+                if ocr_status not in OCR_CANCELLABLE_STATUSES:
+                    continue
+                image["selectedForTranscription"] = False
+                image["ocr"] = {
+                    "imageId": image_id,
+                    "status": "CANCELLED",
+                    "text": "",
+                    "layoutBlocks": [],
+                    "structuredContent": None,
+                    "confidence": None,
+                    "strategyUsed": None,
+                    "preprocessingUsed": None,
+                    "error": "Transcricao cancelada pelo usuario.",
+                }
+                cancelled_ids.append(image_id)
+
+            self._recalculate_summary(record)
+            processing = self._ensure_processing(record)
+            has_pending = any(
+                image.get("selectedForTranscription")
+                and image.get("ocr", {}).get("status") in {"PENDING", "PROCESSING"}
+                for image in all_images
+            )
+            if has_pending:
+                selected = int(processing.get("imagesSelected") or 0)
+                processed = int(processing.get("imagesProcessed") or 0)
+                self._set_processing(
+                    record,
+                    stage="ocr_running",
+                    message=(
+                        f"Transcricao em andamento: {processed}/{selected} imagem(ns) finalizadas."
+                        if selected > 0
+                        else "Transcricao em andamento."
+                    ),
+                    has_error=bool(processing.get("imagesFailed", 0)),
+                    error_message=processing.get("errorMessage"),
+                )
+                record["status"]["transcription"] = "IN_PROGRESS"
+                record["error"] = None
+                return
+            self._apply_transcription_final_state(record)
+
+        self.mutate_record(document_id, _mutate)
+        return cancelled_ids
+
     def update_ocr_result(
         self,
         document_id: str,
@@ -258,6 +384,7 @@ class DocumentService:
         text: str,
         confidence: float | None,
         layout_blocks: list[dict[str, Any]] | None = None,
+        structured_content: dict[str, Any] | None = None,
         strategy_used: str | None = None,
         preprocessing_used: str | None = None,
         error: str | None = None,
@@ -265,12 +392,16 @@ class DocumentService:
         def _mutate(record: dict[str, Any]) -> None:
             image = self._find_image(record, image_id)
             if image is None:
-                raise ValueError(f"Image {image_id} not found in document {document_id}.")
+                raise ValueError(f"Imagem {image_id} nao encontrada no documento {document_id}.")
+            current_status = str(image.get("ocr", {}).get("status") or "")
+            if current_status == "CANCELLED":
+                return
             image["ocr"] = {
                 "imageId": image_id,
                 "status": status,
                 "text": text,
                 "layoutBlocks": layout_blocks or [],
+                "structuredContent": structured_content,
                 "confidence": confidence,
                 "strategyUsed": strategy_used,
                 "preprocessingUsed": preprocessing_used,
@@ -283,16 +414,18 @@ class DocumentService:
             processed = processing["imagesProcessed"]
             selected = processing["imagesSelected"]
             failed = processing["imagesFailed"]
-            in_progress_message = f"OCR in progress: {processed}/{selected} image(s) processed."
+            in_progress_message = (
+                f"Transcricao em andamento: {processed}/{selected} imagem(ns) finalizadas."
+            )
             error_message = None
             if failed > 0:
                 in_progress_message = (
-                    f"OCR in progress with errors: {processed}/{selected} image(s) processed."
+                    f"Transcricao em andamento com erros: {processed}/{selected} imagem(ns) finalizadas."
                 )
                 error_message = (
                     error
                     or str(processing.get("errorMessage") or "")
-                    or "Some images failed during OCR."
+                    or "Algumas imagens falharam durante a transcricao."
                 )
 
             self._set_processing(
@@ -308,67 +441,89 @@ class DocumentService:
     def mark_transcription_completed(self, document_id: str) -> None:
         def _mutate(record: dict[str, Any]) -> None:
             self._recalculate_summary(record)
-            processing = self._ensure_processing(record)
-
-            selected = int(processing["imagesSelected"])
-            failed = int(processing["imagesFailed"])
-            succeeded = int(processing["imagesSucceeded"])
-
-            if selected == 0:
-                record["status"]["transcription"] = "COMPLETED"
-                record["error"] = None
-                self._set_processing(
-                    record,
-                    stage="completed",
-                    message="No images selected. Processing finished.",
-                    has_error=False,
-                    error_message=None,
-                    progress=100.0,
-                )
-                return
-
-            if failed == 0:
-                record["status"]["transcription"] = "COMPLETED"
-                record["error"] = None
-                self._set_processing(
-                    record,
-                    stage="completed",
-                    message=f"OCR completed successfully for {succeeded} image(s).",
-                    has_error=False,
-                    error_message=None,
-                    progress=100.0,
-                )
-                return
-
-            if succeeded > 0:
-                error_message = (
-                    f"OCR finished with errors: {succeeded} succeeded and {failed} failed."
-                )
-                record["status"]["transcription"] = "COMPLETED"
-                record["error"] = None
-                self._set_processing(
-                    record,
-                    stage="completed_with_errors",
-                    message=error_message,
-                    has_error=True,
-                    error_message=error_message,
-                    progress=100.0,
-                )
-                return
-
-            error_message = "OCR failed for all selected images."
-            record["status"]["transcription"] = "FAILED"
-            record["error"] = error_message
-            self._set_processing(
-                record,
-                stage="failed",
-                message=error_message,
-                has_error=True,
-                error_message=error_message,
-                progress=100.0,
-            )
+            self._apply_transcription_final_state(record)
 
         self.mutate_record(document_id, _mutate)
+
+    def _apply_transcription_final_state(self, record: dict[str, Any]) -> None:
+        processing = self._ensure_processing(record)
+        selected = int(processing.get("imagesSelected") or 0)
+        failed = int(processing.get("imagesFailed") or 0)
+        succeeded = int(processing.get("imagesSucceeded") or 0)
+        cancelled = int(processing.get("imagesCancelled") or 0)
+
+        if succeeded == 0 and failed == 0 and cancelled > 0 and selected == 0:
+            message = f"Transcricao cancelada em {cancelled} imagem(ns)."
+            record["status"]["transcription"] = "CANCELLED"
+            record["error"] = None
+            self._set_processing(
+                record,
+                stage="cancelled",
+                message=message,
+                has_error=False,
+                error_message=None,
+                progress=100.0,
+            )
+            return
+
+        if selected == 0:
+            record["status"]["transcription"] = "COMPLETED"
+            record["error"] = None
+            self._set_processing(
+                record,
+                stage="completed",
+                message="Nenhuma imagem selecionada. Fluxo finalizado.",
+                has_error=False,
+                error_message=None,
+                progress=100.0,
+            )
+            return
+
+        if failed == 0:
+            message = f"Transcricao concluida com sucesso em {succeeded} imagem(ns)."
+            if cancelled > 0:
+                message = (
+                    f"Transcricao concluida: {succeeded} finalizada(s) e {cancelled} cancelada(s)."
+                )
+            record["status"]["transcription"] = "COMPLETED"
+            record["error"] = None
+            self._set_processing(
+                record,
+                stage="completed",
+                message=message,
+                has_error=False,
+                error_message=None,
+                progress=100.0,
+            )
+            return
+
+        if succeeded > 0 or cancelled > 0:
+            message = (
+                f"Transcricao concluida com erros: {succeeded} finalizada(s), {failed} com erro e {cancelled} cancelada(s)."
+            )
+            record["status"]["transcription"] = "COMPLETED"
+            record["error"] = None
+            self._set_processing(
+                record,
+                stage="completed_with_errors",
+                message=message,
+                has_error=True,
+                error_message=message,
+                progress=100.0,
+            )
+            return
+
+        error_message = "A transcricao falhou em todas as imagens selecionadas."
+        record["status"]["transcription"] = "FAILED"
+        record["error"] = error_message
+        self._set_processing(
+            record,
+            stage="failed",
+            message=error_message,
+            has_error=True,
+            error_message=error_message,
+            progress=100.0,
+        )
 
     def fail_transcription(self, document_id: str, error_message: str) -> None:
         def _mutate(record: dict[str, Any]) -> None:
@@ -377,7 +532,7 @@ class DocumentService:
             self._set_processing(
                 record,
                 stage="failed",
-                message="Failed to run OCR.",
+                message="Falha ao executar a transcricao.",
                 has_error=True,
                 error_message=error_message,
             )
@@ -390,7 +545,7 @@ class DocumentService:
         with self._lock:
             record = self.get_record(document_id)
             if not record:
-                raise FileNotFoundError(f"Document {document_id} was not found.")
+                raise FileNotFoundError(f"Documento {document_id} nao foi encontrado.")
             self._ensure_processing(record)
             mutator(record)
             timestamp = self._timestamp()
@@ -410,6 +565,7 @@ class DocumentService:
         summary.setdefault("transcribedTotal", 0)
         summary.setdefault("lowConfidenceTotal", 0)
         summary.setdefault("noTextTotal", 0)
+        summary.setdefault("cancelledTotal", 0)
         for page in payload.get("pages", []):
             for image in page.get("images", []):
                 if not image.get("thumbnailUrl"):
@@ -426,6 +582,7 @@ class DocumentService:
                 image.setdefault("ocr", {})
                 image["ocr"].setdefault("imageId", image.get("id", ""))
                 image["ocr"].setdefault("layoutBlocks", [])
+                image["ocr"].setdefault("structuredContent", None)
                 image["ocr"].setdefault("strategyUsed", None)
                 image["ocr"].setdefault("preprocessingUsed", None)
                 image.pop("_storage", None)
@@ -464,6 +621,9 @@ class DocumentService:
         summary["noTextTotal"] = sum(
             1 for image in images if image.get("ocr", {}).get("status") == "NO_TEXT"
         )
+        summary["cancelledTotal"] = sum(
+            1 for image in images if image.get("ocr", {}).get("status") == "CANCELLED"
+        )
 
         processing = self._ensure_processing(record)
         processing["totalPages"] = summary["pagesTotal"]
@@ -480,6 +640,9 @@ class DocumentService:
             for image in images
             if image.get("selectedForTranscription")
             and image.get("ocr", {}).get("status") == "ERROR"
+        )
+        processing["imagesCancelled"] = sum(
+            1 for image in images if image.get("ocr", {}).get("status") == "CANCELLED"
         )
         processing["imagesProcessed"] = sum(
             1
@@ -507,7 +670,7 @@ class DocumentService:
         progress: float | None = None,
     ) -> None:
         if stage not in PROCESSING_STAGES:
-            raise ValueError(f"Unsupported processing stage: {stage}")
+            raise ValueError(f"Etapa de processamento nao suportada: {stage}")
 
         processing = self._ensure_processing(record)
         processing["stage"] = stage
@@ -538,7 +701,7 @@ class DocumentService:
         return {
             "documentId": document_id,
             "stage": "uploaded",
-            "message": "Upload complete. Waiting for analysis.",
+            "message": "Upload concluido. Aguardando analise.",
             "progress": 5.0,
             "hasError": False,
             "errorMessage": None,
@@ -549,6 +712,7 @@ class DocumentService:
             "imagesProcessed": 0,
             "imagesSucceeded": 0,
             "imagesFailed": 0,
+            "imagesCancelled": 0,
             "updatedAt": updated_at,
         }
 
@@ -581,7 +745,7 @@ class DocumentService:
             )
             ratio = images_processed / images_selected
             return 65.0 + ratio * 30.0
-        if stage in {"completed", "completed_with_errors", "failed"}:
+        if stage in {"cancelled", "completed", "completed_with_errors", "failed"}:
             return 100.0
         return 0.0
 

@@ -1,9 +1,32 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PDF Vision OCR</title>
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      (function () {
+        var storageKey = "pdf-transcribe-theme";
+        var rawPreference = "system";
+        try {
+          rawPreference = localStorage.getItem(storageKey) || "system";
+        } catch (_error) {}
+        var preference =
+          rawPreference === "light" || rawPreference === "dark" || rawPreference === "system"
+            ? rawPreference
+            : "system";
+        var resolved =
+          preference === "system"
+            ? window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light"
+            : preference;
+        document.documentElement.dataset.theme = resolved;
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.style.colorScheme = resolved;
+      })();
+    </script>
+    <title>pdf transcribe</title>
   </head>
   <body>
     <div id="root"></div>

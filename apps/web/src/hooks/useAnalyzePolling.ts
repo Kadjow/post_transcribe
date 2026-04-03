@@ -3,21 +3,26 @@ import type { DocumentProcessingStatus, DocumentResult } from "../types/api";
 import { getDocumentStatus, getResults } from "../services/pdfService";
 import { POLLING_INTERVAL_MS } from "../utils/constants";
 
-interface AnalyzePollingState {
+interface AnalyzePollingInternalState {
   data: DocumentResult | null;
   processing: DocumentProcessingStatus | null;
   isLoading: boolean;
   error: string | null;
 }
 
+interface AnalyzePollingState extends AnalyzePollingInternalState {
+  retry: () => void;
+}
+
 export function useAnalyzePolling(documentId: string | undefined): AnalyzePollingState {
-  const [state, setState] = useState<AnalyzePollingState>({
+  const [state, setState] = useState<AnalyzePollingInternalState>({
     data: null,
     processing: null,
     isLoading: false,
     error: null
   });
   const timerRef = useRef<number | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     if (!documentId) {
@@ -76,12 +81,12 @@ export function useAnalyzePolling(documentId: string | undefined): AnalyzePollin
         if (!isMounted) {
           return;
         }
-        setState({
-          data: null,
-          processing: null,
+        setState((previous) => ({
+          ...previous,
           isLoading: false,
-          error: error instanceof Error ? error.message : "Failed to fetch analysis status."
-        });
+          error:
+            error instanceof Error ? error.message : "Falha ao buscar o status da analise."
+        }));
       }
     };
 
@@ -91,7 +96,14 @@ export function useAnalyzePolling(documentId: string | undefined): AnalyzePollin
       isMounted = false;
       stopTimer();
     };
-  }, [documentId]);
+  }, [documentId, retryNonce]);
 
-  return state;
+  const retry = () => {
+    setRetryNonce((previous) => previous + 1);
+  };
+
+  return {
+    ...state,
+    retry
+  };
 }

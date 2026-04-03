@@ -128,6 +128,7 @@ class PdfService:
                                 "status": "NOT_REQUESTED",
                                 "text": "",
                                 "layoutBlocks": [],
+                                "structuredContent": None,
                                 "confidence": None,
                                 "strategyUsed": None,
                                 "preprocessingUsed": None,

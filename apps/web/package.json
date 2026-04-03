@@ -1,5 +1,5 @@
 {
-  "name": "@pdf-vision/web",
+  "name": "@pdf-transcribe/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -10,7 +10,7 @@
     "test": "echo \"No frontend tests configured yet\""
   },
   "dependencies": {
-    "@pdf-vision/contracts": "workspace:*",
+    "@pdf-transcribe/contracts": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.1"

@@ -1,8 +1,8 @@
 {
-  "name": "pdf-vision-ocr",
+  "name": "pdf-transcribe",
   "private": true,
   "version": "0.1.0",
-  "description": "Monorepo MVP for PDF image extraction, review, and OCR transcription.",
+  "description": "Monorepo MVP para extracao de imagens de PDF, revisao e transcricao.",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "turbo run dev --parallel",

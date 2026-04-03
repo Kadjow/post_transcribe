@@ -32,7 +32,7 @@ export function ImageCard({
     if (src !== originalSrc && originalSrc) {
       if (import.meta.env.DEV) {
         console.warn(
-          `[ImageCard] Thumbnail failed for ${image.id}. Fallback to imageUrl.`,
+          `[ImageCard] Falha na miniatura de ${image.id}. Usando imageUrl como fallback.`,
           src
         );
       }
@@ -40,7 +40,7 @@ export function ImageCard({
       return;
     }
     if (import.meta.env.DEV) {
-      console.warn(`[ImageCard] Image failed for ${image.id}.`, src);
+      console.warn(`[ImageCard] Falha ao carregar imagem ${image.id}.`, src);
     }
     setFailed(true);
   };
@@ -48,17 +48,17 @@ export function ImageCard({
   return (
     <article className="image-card">
       {!failed ? (
-        <img src={src} alt={`Preview ${image.id}`} loading="lazy" onError={handleImageError} />
+        <img src={src} alt={`Miniatura ${image.id}`} loading="lazy" onError={handleImageError} />
       ) : (
         <div className="image-fallback">
-          <strong>Preview unavailable</strong>
+          <strong>Miniatura indisponivel</strong>
           <span className="muted">{image.id}</span>
         </div>
       )}
       <div className="stack tight">
         <div className="row between">
           <strong>{image.id}</strong>
-          <span className="muted">Page {image.page}</span>
+          <span className="muted">Pagina {image.page}</span>
         </div>
         {selectable ? (
           <label className="row gap-sm">
@@ -67,7 +67,7 @@ export function ImageCard({
               checked={selected}
               onChange={() => onToggleSelection(image.id)}
             />
-            Select for OCR
+            Selecionar para transcricao
           </label>
         ) : null}
       </div>

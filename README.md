@@ -1,6 +1,6 @@
-# PDF Vision OCR Monorepo
+# pdf transcribe
 
-MVP for PDF upload, per-page image extraction, thumbnail preview, image review, and OCR transcription.
+MVP para upload de PDF, extracao de imagens por pagina, miniaturas, revisao e transcricao.
 
 ## Stack
 - Monorepo: `pnpm workspaces` + `turborepo`
@@ -21,7 +21,7 @@ packages/
 - Node.js 20+
 - pnpm 10+
 - Python 3.11+
-- Tesseract OCR installed locally
+- Tesseract instalado localmente
 
 ## Windows Tesseract setup
 1. Install:
@@ -70,7 +70,7 @@ cd apps\api
 
 Terminal B (Web):
 ```powershell
-pnpm.cmd --filter @pdf-vision/web dev
+pnpm.cmd --filter ./apps/web dev
 ```
 
 Important:
@@ -82,11 +82,11 @@ Important:
 2. Upload a PDF containing embedded images.
 3. Confirm review page shows real image previews.
 4. Confirm results page shows real previews.
-5. Test transcription actions:
-   - `Transcribe all`
-   - `Do not transcribe`
-   - `Transcribe selected`
-6. If OCR dependency is missing, confirm image OCR status is `ERROR` with a friendly dependency message.
+5. Teste as acoes de transcricao:
+   - `Iniciar transcricao de todas`
+   - `Nao iniciar transcricao`
+   - `Iniciar transcricao das selecionadas`
+6. Se a dependencia de transcricao estiver ausente, confirme se o status da imagem fica em `ERROR` com mensagem amigavel.
 
 ## Endpoints
 - `POST /v1/pdfs/analyze`

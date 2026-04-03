@@ -54,13 +54,13 @@ class TesseractOcrService(OcrService):
         except (pytesseract.TesseractNotFoundError, OSError) as exc:
             resolved_cmd = self.tesseract_cmd or which("tesseract")
             configured_hint = (
-                f" Current TESSERACT_CMD='{self.tesseract_cmd}'."
+                f" TESSERACT_CMD atual='{self.tesseract_cmd}'."
                 if self.tesseract_cmd
-                else " You can set TESSERACT_CMD in .env to the full executable path."
+                else " Defina TESSERACT_CMD no .env com o caminho completo do executavel."
             )
             raise OcrDependencyError(
-                "OCR dependency unavailable: Tesseract executable not found in PATH."
-                f" Resolved command: {resolved_cmd!r}."
+                "Dependencia de transcricao indisponivel: executavel do Tesseract nao encontrado no PATH."
+                f" Comando resolvido: {resolved_cmd!r}."
                 + configured_hint
             ) from exc
 
@@ -96,7 +96,7 @@ class TesseractOcrService(OcrService):
                 status="ERROR",
                 text="",
                 confidence=None,
-                error=f"OCR failed: {last_error}",
+                error=f"Falha na transcricao: {last_error}",
             )
 
         return OcrTranscriptionResult(status="NO_TEXT", text="", confidence=None)
@@ -106,11 +106,18 @@ class TesseractOcrService(OcrService):
     ) -> OcrTranscriptionResult:
         try:
             layout_blocks = self.layout_service.extract_blocks(image_path, languages)
+            structured_content = self.layout_service.build_structured_content(
+                image_path, layout_blocks
+            )
         except Exception:
             return result
-        if not layout_blocks:
+        if not layout_blocks and structured_content is None:
             return result
-        return replace(result, layout_blocks=layout_blocks)
+        return replace(
+            result,
+            layout_blocks=layout_blocks,
+            structured_content=structured_content,
+        )
 
     def _run_attempt(
         self, variant: OcrImageVariant, strategy: OcrAttemptStrategy, languages: str
