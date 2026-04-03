@@ -1,5 +1,5 @@
 ﻿import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from shutil import which
 from typing import Any
@@ -7,6 +7,7 @@ from typing import Any
 import pytesseract
 
 from app.services.ocr.base import OcrService, OcrTranscriptionResult
+from app.services.ocr.layout_structure_service import LayoutStructureService
 from app.utils.images import OcrImageVariant, build_ocr_variants
 
 
@@ -43,6 +44,7 @@ class OcrAttemptResult:
 class TesseractOcrService(OcrService):
     def __init__(self, tesseract_cmd: str | None = None):
         self.tesseract_cmd = tesseract_cmd or self._discover_windows_tesseract()
+        self.layout_service = LayoutStructureService()
         if self.tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
 
@@ -52,13 +54,13 @@ class TesseractOcrService(OcrService):
         except (pytesseract.TesseractNotFoundError, OSError) as exc:
             resolved_cmd = self.tesseract_cmd or which("tesseract")
             configured_hint = (
-                f" Current TESSERACT_CMD='{self.tesseract_cmd}'."
+                f" TESSERACT_CMD atual='{self.tesseract_cmd}'."
                 if self.tesseract_cmd
-                else " You can set TESSERACT_CMD in .env to the full executable path."
+                else " Defina TESSERACT_CMD no .env com o caminho completo do executavel."
             )
             raise OcrDependencyError(
-                "OCR dependency unavailable: Tesseract executable not found in PATH."
-                f" Resolved command: {resolved_cmd!r}."
+                "Dependencia de transcricao indisponivel: executavel do Tesseract nao encontrado no PATH."
+                f" Comando resolvido: {resolved_cmd!r}."
                 + configured_hint
             ) from exc
 
@@ -86,17 +88,36 @@ class TesseractOcrService(OcrService):
                 variant.image.close()
 
         if attempts:
-            return self._select_best_result(attempts)
+            result = self._select_best_result(attempts)
+            return self._attach_layout_blocks(image_path, languages, result)
 
         if last_error is not None:
             return OcrTranscriptionResult(
                 status="ERROR",
                 text="",
                 confidence=None,
-                error=f"OCR failed: {last_error}",
+                error=f"Falha na transcricao: {last_error}",
             )
 
         return OcrTranscriptionResult(status="NO_TEXT", text="", confidence=None)
+
+    def _attach_layout_blocks(
+        self, image_path: Path, languages: str, result: OcrTranscriptionResult
+    ) -> OcrTranscriptionResult:
+        try:
+            layout_blocks = self.layout_service.extract_blocks(image_path, languages)
+            structured_content = self.layout_service.build_structured_content(
+                image_path, layout_blocks
+            )
+        except Exception:
+            return result
+        if not layout_blocks and structured_content is None:
+            return result
+        return replace(
+            result,
+            layout_blocks=layout_blocks,
+            structured_content=structured_content,
+        )
 
     def _run_attempt(
         self, variant: OcrImageVariant, strategy: OcrAttemptStrategy, languages: str
@@ -413,3 +434,5 @@ class TesseractOcrService(OcrService):
             if Path(candidate).exists():
                 return candidate
         return None
+
+

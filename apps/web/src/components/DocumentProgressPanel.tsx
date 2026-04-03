@@ -44,8 +44,9 @@ export function DocumentProgressPanel({
     processing?.imagesSucceeded ?? summary?.transcribedTotal
   );
   const imagesFailed = safeCount(processing?.imagesFailed);
+  const imagesCancelled = safeCount(processing?.imagesCancelled);
   const imagesProcessed = safeCount(processing?.imagesProcessed);
-  const imagesPending = Math.max(imagesFound - imagesSucceeded - imagesFailed, 0);
+  const imagesPending = Math.max(imagesFound - imagesSucceeded - imagesFailed - imagesCancelled, 0);
 
   const nextStepMessage = (() => {
     if (!processing) {
@@ -55,13 +56,16 @@ export function DocumentProgressPanel({
       return "Selecione as imagens desejadas e inicie a transcricao.";
     }
     if (processing.stage === "ocr_running") {
-      return "Acompanhe o OCR em tempo real e revise as imagens com erro ao final.";
+      return "Acompanhe a transcricao em tempo real e revise as imagens com erro ao final.";
+    }
+    if (processing.stage === "cancelled") {
+      return "A transcricao foi cancelada. Se necessario, selecione novas imagens e inicie novamente.";
     }
     if (processing.stage === "completed") {
       return "Fluxo finalizado. Revise os resultados de leitura na lista de imagens.";
     }
     if (processing.stage === "completed_with_errors") {
-      return "OCR concluido com erros. Priorize as imagens em vermelho para revisao.";
+      return "Transcricao concluida com erros. Priorize as imagens em vermelho para revisao.";
     }
     if (processing.stage === "failed") {
       return "Processo interrompido. Revise a mensagem de erro para decidir o proximo passo.";
@@ -120,13 +124,13 @@ export function DocumentProgressPanel({
 
         <section className="stack tight progress-item">
           <div className="row between">
-            <strong>OCR</strong>
+            <strong>Transcricao</strong>
             <span className="muted">{ocrProgress}%</span>
           </div>
           <div
             className="progress-track"
             role="progressbar"
-            aria-label="Progresso do OCR"
+            aria-label="Progresso da transcricao"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={ocrProgress}
@@ -139,8 +143,8 @@ export function DocumentProgressPanel({
 
       {waitingForUserSelection ? (
         <p className="info">
-          Analise concluida. OCR ainda nao iniciado. Selecione as imagens e clique em uma acao de
-          transcricao.
+          Analise concluida. A transcricao ainda nao foi iniciada. Selecione as imagens e clique
+          em uma acao de transcricao.
         </p>
       ) : null}
 
@@ -156,6 +160,10 @@ export function DocumentProgressPanel({
         <div className="summary-item">
           <span className="muted">Pendentes</span>
           <strong>{imagesPending}</strong>
+        </div>
+        <div className="summary-item">
+          <span className="muted">Canceladas</span>
+          <strong>{imagesCancelled}</strong>
         </div>
       </div>
 
@@ -185,6 +193,10 @@ export function DocumentProgressPanel({
         <div className="summary-item">
           <span className="muted">Com erro</span>
           <strong>{imagesFailed}</strong>
+        </div>
+        <div className="summary-item">
+          <span className="muted">Canceladas</span>
+          <strong>{imagesCancelled}</strong>
         </div>
       </div>
 

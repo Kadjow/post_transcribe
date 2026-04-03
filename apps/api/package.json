@@ -1,5 +1,5 @@
 {
-  "name": "@pdf-vision/api",
+  "name": "@pdf-transcribe/api",
   "private": true,
   "version": "0.1.0",
   "scripts": {

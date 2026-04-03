@@ -14,6 +14,8 @@ from fastapi import (
 
 from app.schemas.pdfs import (
     AnalyzePdfResponse,
+    CancelTranscriptionRequest,
+    CancelTranscriptionResponse,
     DocumentProcessingStatusSchema,
     DocumentResultSchema,
     StartTranscriptionRequest,
@@ -53,19 +55,19 @@ def _run_analysis_task(app_state: Any, document_id: str, thumbnail_width: int) -
             page_number = int(event.get("pageNumber") or 0)
 
             if event_name == "analysis_started":
-                message = "Analyzing PDF metadata."
+                message = "Analisando metadados do PDF."
                 stage = "analyzing_pdf"
             elif event_name == "page_started":
-                message = f"Extracting images from page {page_number}/{max(total_pages, 1)}."
+                message = f"Extraindo imagens da pagina {page_number}/{max(total_pages, 1)}."
                 stage = "extracting_images"
             elif event_name == "thumbnail_started":
                 message = (
-                    f"Generating thumbnail for page {page_number}/{max(total_pages, 1)}."
+                    f"Gerando miniatura da pagina {page_number}/{max(total_pages, 1)}."
                 )
                 stage = "generating_thumbnails"
             elif event_name == "page_completed":
                 message = (
-                    f"Processed page {pages_processed}/{max(total_pages, 1)} during extraction."
+                    f"Pagina {pages_processed}/{max(total_pages, 1)} processada na extracao."
                 )
                 stage = "extracting_images"
             else:
@@ -88,7 +90,7 @@ def _run_analysis_task(app_state: Any, document_id: str, thumbnail_width: int) -
         )
         document_service.complete_analysis(document_id, pages)
     except Exception as exc:
-        logger.exception("Failed to analyze document %s", document_id)
+        logger.exception("Falha ao analisar o documento %s", document_id)
         document_service.fail_analysis(document_id, str(exc))
 
 
@@ -97,8 +99,7 @@ def _run_transcription_task(app_state: Any, document_id: str, ocr_languages: str
     ocr_service = app_state.ocr_service
 
     try:
-        selected_images = document_service.selected_images_for_ocr(document_id)
-        if not selected_images:
+        if not document_service.selected_images_for_ocr(document_id):
             document_service.mark_transcription_completed(document_id)
             return
 
@@ -106,7 +107,11 @@ def _run_transcription_task(app_state: Any, document_id: str, ocr_languages: str
             ocr_service.ensure_available()
         except OcrDependencyError as dependency_error:
             dependency_message = str(dependency_error)
-            for image_id, _ in selected_images:
+            while True:
+                claimed = document_service.claim_next_image_for_transcription(document_id)
+                if not claimed:
+                    break
+                image_id, _ = claimed
                 document_service.update_ocr_result(
                     document_id,
                     image_id,
@@ -120,7 +125,11 @@ def _run_transcription_task(app_state: Any, document_id: str, ocr_languages: str
             document_service.mark_transcription_completed(document_id)
             return
 
-        for image_id, image_path in selected_images:
+        while True:
+            claimed = document_service.claim_next_image_for_transcription(document_id)
+            if not claimed:
+                break
+            image_id, image_path = claimed
             try:
                 ocr_result = ocr_service.transcribe(image_path, ocr_languages)
                 document_service.update_ocr_result(
@@ -129,13 +138,23 @@ def _run_transcription_task(app_state: Any, document_id: str, ocr_languages: str
                     ocr_result.status,
                     ocr_result.text,
                     ocr_result.confidence,
+                    layout_blocks=[
+                        block.to_payload() for block in (ocr_result.layout_blocks or [])
+                    ],
+                    structured_content=(
+                        ocr_result.structured_content.to_payload()
+                        if ocr_result.structured_content is not None
+                        else None
+                    ),
                     strategy_used=ocr_result.strategy_used,
                     preprocessing_used=ocr_result.preprocessing_used,
                     error=ocr_result.error,
                 )
             except Exception as image_exc:
                 logger.exception(
-                    "Failed OCR for image %s (document %s)", image_id, document_id
+                    "Falha na transcricao da imagem %s (documento %s)",
+                    image_id,
+                    document_id,
                 )
                 document_service.update_ocr_result(
                     document_id,
@@ -145,12 +164,12 @@ def _run_transcription_task(app_state: Any, document_id: str, ocr_languages: str
                     None,
                     strategy_used=None,
                     preprocessing_used=None,
-                    error=f"OCR failed for image {image_id}: {image_exc}",
+                    error=f"Falha na transcricao da imagem {image_id}: {image_exc}",
                 )
 
         document_service.mark_transcription_completed(document_id)
     except Exception as exc:
-        logger.exception("Failed to transcribe document %s", document_id)
+        logger.exception("Falha ao transcrever o documento %s", document_id)
         document_service.fail_transcription(document_id, str(exc))
 
 
@@ -169,7 +188,7 @@ async def analyze_pdf(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF files are accepted.",
+            detail="Apenas arquivos PDF sao aceitos.",
         )
 
     document_id = generate_document_id()
@@ -194,7 +213,7 @@ async def analyze_pdf(
     return AnalyzePdfResponse(
         documentId=document_id,
         status="ANALYZING",
-        message="PDF received. Analysis started.",
+        message="PDF recebido. Analise iniciada.",
         links={
             "results": f"/v1/pdfs/{document_id}/results",
             "status": f"/v1/pdfs/{document_id}/status",
@@ -215,7 +234,10 @@ async def start_transcriptions(
     document_service = _get_document_service(request)
     record = document_service.get_record(payload.documentId)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento nao encontrado.",
+        )
 
     try:
         accepted_ids = document_service.start_transcription(
@@ -231,14 +253,69 @@ async def start_transcriptions(
         )
 
     message = (
-        "Transcription started."
+        "Transcricao iniciada."
         if accepted_ids
-        else "No image selected for transcription."
+        else "Nenhuma imagem selecionada para transcricao."
     )
     return StartTranscriptionResponse(
         documentId=payload.documentId,
         status=response_status,
         acceptedImageCount=len(accepted_ids),
+        message=message,
+        links={
+            "results": f"/v1/pdfs/{payload.documentId}/results",
+            "status": f"/v1/pdfs/{payload.documentId}/status",
+        },
+    )
+
+
+@router.post(
+    "/transcriptions/cancel",
+    response_model=CancelTranscriptionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_transcriptions(
+    payload: CancelTranscriptionRequest,
+    request: Request,
+) -> CancelTranscriptionResponse:
+    document_service = _get_document_service(request)
+    record = document_service.get_record(payload.documentId)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento nao encontrado.",
+        )
+
+    try:
+        cancelled_ids = document_service.cancel_transcription(
+            payload.documentId,
+            payload.mode,
+            payload.imageIds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    updated_record = document_service.get_record(payload.documentId) or {}
+    transcription_status = str(
+        updated_record.get("status", {}).get("transcription", "COMPLETED")
+    )
+    response_status = (
+        "TRANSCRIBING"
+        if transcription_status == "IN_PROGRESS"
+        else "CANCELLED"
+        if transcription_status == "CANCELLED"
+        else "COMPLETED"
+    )
+    message = (
+        f"Transcricao cancelada em {len(cancelled_ids)} imagem(ns)."
+        if cancelled_ids
+        else "Nenhuma imagem elegivel para cancelamento."
+    )
+
+    return CancelTranscriptionResponse(
+        documentId=payload.documentId,
+        status=response_status,
+        cancelledImageCount=len(cancelled_ids),
         message=message,
         links={
             "results": f"/v1/pdfs/{payload.documentId}/results",
@@ -254,7 +331,10 @@ async def get_processing_status(
     document_service = _get_document_service(request)
     record = document_service.get_processing_status(document_id)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento nao encontrado.",
+        )
     return DocumentProcessingStatusSchema(**record)
 
 
@@ -263,5 +343,8 @@ async def get_results(document_id: str, request: Request) -> DocumentResultSchem
     document_service = _get_document_service(request)
     record = document_service.get_public_record(document_id)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento nao encontrado.",
+        )
     return DocumentResultSchema(**record)

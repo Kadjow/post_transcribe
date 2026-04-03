@@ -16,7 +16,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@pdf-vision/contracts':
+      '@pdf-transcribe/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
       react:
